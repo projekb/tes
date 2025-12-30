@@ -28,28 +28,34 @@ function playMusic() {
   });
 }
 
-// Try playing audio robustly: first HTMLAudio, then fallback to AudioContext decoding
+// Try playing audio robustly: first unmute + play HTMLAudio, then fallback to AudioContext decoding
 async function tryPlayAudio() {
   const bg = document.getElementById('bgMusic');
   if (!bg) return;
-  // if already playing, nothing to do
-  if (!bg.paused) return;
 
   try {
+    // Chrome Android allows muted audio to autoplay; unmute + play on gesture
+    bg.muted = false;
     bg.volume = 0.6;
     await bg.play();
+    console.log('Audio playing via HTMLAudio element');
     return;
   } catch (err) {
     // HTMLAudio.play() blocked — try WebAudio fallback
+    console.log('HTMLAudio play failed, trying WebAudio fallback:', err);
     try {
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       if (audioCtx.state === 'suspended') await audioCtx.resume();
 
       // if we already have a fallbackSource playing, skip
-      if (fallbackSource) return;
+      if (fallbackSource) {
+        console.log('Fallback already playing');
+        return;
+      }
 
       // fetch and decode audio data
-      const resp = await fetch(bg.getAttribute('src'), { mode: 'cors' });
+      const audioSrc = bg.getAttribute('src');
+      const resp = await fetch(audioSrc, { mode: 'cors' });
       const arr = await resp.arrayBuffer();
       const buf = await audioCtx.decodeAudioData(arr);
 
@@ -60,11 +66,16 @@ async function tryPlayAudio() {
       fallbackGain.gain.value = 0.6;
       fallbackSource.connect(fallbackGain).connect(audioCtx.destination);
       fallbackSource.start(0);
+      console.log('Audio playing via WebAudio fallback');
     } catch (e) {
-      console.log('WebAudio fallback failed', e);
+      console.log('WebAudio fallback also failed', e);
       showAudioToast('Ketuk layar lagi untuk memutar musik');
       // set a one-time retry on next gesture
-      const retry = () => { tryPlayAudio(); document.body.removeEventListener('pointerdown', retry); hideAudioToast(); };
+      const retry = () => { 
+        tryPlayAudio(); 
+        document.body.removeEventListener('pointerdown', retry); 
+        hideAudioToast(); 
+      };
       document.body.addEventListener('pointerdown', retry, { once: true });
     }
   }
